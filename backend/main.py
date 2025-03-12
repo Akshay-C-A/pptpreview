@@ -108,81 +108,57 @@ def extract_slide_images(pptx_path, temp_dir):
     
     return slide_images
 
+# Replace the convert_pptx_to_pdf function in main.py with this improved version
 def convert_pptx_to_pdf(pptx_path, pdf_path, temp_dir):
     """Convert PPTX to PDF using python-pptx and reportlab"""
+    # First extract slide images - this was defined but not used in original code
+    slide_images = extract_slide_images(pptx_path, temp_dir)
+    
     prs = Presentation(pptx_path)
     
-    # Extract slide dimensions
-    slide_width = prs.slide_width
-    slide_height = prs.slide_height
+    # Extract slide dimensions (convert from EMU to points for PDF)
+    slide_width = prs.slide_width / 914400 * 72  # Convert EMU to points
+    slide_height = prs.slide_height / 914400 * 72  # Convert EMU to points
     
     # Create a PDF with the same aspect ratio
     c = canvas.Canvas(pdf_path, pagesize=(slide_width, slide_height))
     
     # Process each slide
-    for i, slide in enumerate(prs.slides):
-        # Extract text and shapes from the slide
-        slide_texts = []
-        slide_images = []
-        
-        # Process shapes in the slide
-        for shape in slide.shapes:
-            # Handle text
-            if hasattr(shape, "text") and shape.text:
-                x = shape.left if hasattr(shape, "left") else 0
-                y = slide_height - (shape.top + shape.height if hasattr(shape, "top") and hasattr(shape, "height") else 0)
-                slide_texts.append((shape.text, x, y))
+    for i, slide_img_path in enumerate(slide_images):
+        # Use the extracted slide image
+        try:
+            # Draw the slide image as the background
+            c.drawImage(slide_img_path, 0, 0, width=slide_width, height=slide_height)
             
-            # Handle images (placeholders)
-            if shape.shape_type == 13:  # IMAGE shape type
-                if hasattr(shape, "image"):
-                    try:
-                        image_stream = BytesIO(shape.image.blob)
-                        x = shape.left if hasattr(shape, "left") else 0
-                        y = slide_height - (shape.top + shape.height if hasattr(shape, "top") and hasattr(shape, "height") else 0)
-                        width = shape.width if hasattr(shape, "width") else 100
-                        height = shape.height if hasattr(shape, "height") else 100
-                        slide_images.append((image_stream, x, y, width, height))
-                    except:
-                        pass
-        
-        # Draw slide background (white)
-        c.setFillColorRGB(1, 1, 1)
-        c.rect(0, 0, slide_width, slide_height, fill=True)
-        
-        # Draw a border around the slide
-        c.setStrokeColorRGB(0.8, 0.8, 0.8)
-        c.rect(0, 0, slide_width, slide_height, fill=False)
-        
-        # Draw images
-        for img_stream, x, y, width, height in slide_images:
-            try:
-                img = ImageReader(img_stream)
-                c.drawImage(img, x, y, width, height)
-            except:
-                # Draw a placeholder for failed images
-                c.setFillColorRGB(0.9, 0.9, 0.9)
-                c.rect(x, y, width, height, fill=True)
-                c.setFillColorRGB(0.5, 0.5, 0.5)
-                c.drawString(x + 10, y + height/2, "Image Placeholder")
-        
-        # Draw text elements
-        for text, x, y in slide_texts:
-            # Set font and size
-            c.setFillColorRGB(0, 0, 0)
-            c.setFont("Helvetica", 12)
+            # Try to load text data if available
+            text_path = Path(temp_dir) / f"slide_{i+1}_text.txt"
+            if text_path.exists():
+                with open(text_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        parts = line.strip().split('|')
+                        if len(parts) >= 3:
+                            text, left, top = parts[0], float(parts[1]), float(parts[2])
+                            # Adjust coordinates for PDF
+                            pdf_left = left
+                            pdf_top = slide_height - top - 12  # Adjust for text height
+                            
+                            # Draw text
+                            c.setFont("Helvetica", 12)
+                            c.setFillColorRGB(0, 0, 0)
+                            c.drawString(pdf_left, pdf_top, text)
             
-            # Split text into lines
-            lines = text.split('\n')
-            line_height = 15
+            # Add slide number
+            c.setFont("Helvetica", 10)
+            c.setFillColorRGB(0.5, 0.5, 0.5)
+            c.drawString(slide_width - 60, 20, f"Slide {i+1}")
             
-            for i, line in enumerate(lines):
-                c.drawString(x, y - (i * line_height), line)
-        
-        # Add slide number
-        c.setFont("Helvetica", 10)
-        c.setFillColorRGB(0.5, 0.5, 0.5)
-        c.drawString(slide_width - 60, 20, f"Slide {i+1}")
+        except Exception as e:
+            # If something goes wrong, create a white slide with error message
+            c.setFillColorRGB(1, 1, 1)
+            c.rect(0, 0, slide_width, slide_height, fill=True)
+            c.setFillColorRGB(0.8, 0.1, 0.1)
+            c.setFont("Helvetica", 14)
+            c.drawString(inch, slide_height/2, f"Error rendering slide {i+1}: {str(e)}")
         
         # Move to the next page
         c.showPage()
